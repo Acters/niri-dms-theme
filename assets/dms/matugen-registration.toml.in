@@ -1,0 +1,4 @@
+# Copy/link into the DMS Matugen configs directory only after migration review.
+[templates.niri_dms_glass]
+input_path = '@PROFILE_CONFIG@/matugen/translucent.colors.in'
+output_path = '@PROFILE_DATA@/generated/DankMatugenTranslucent.colors'

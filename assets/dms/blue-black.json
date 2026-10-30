@@ -1,0 +1,49 @@
+{
+  "id": "niri-dms-glass",
+  "name": "Glass Blue / Black",
+  "dark": {
+    "name": "Blue",
+    "primary": "#42a5f5",
+    "primaryText": "#000000",
+    "primaryContainer": "#0d47a1",
+    "secondary": "#8ab4f8",
+    "surface": "#000000",
+    "surfaceText": "#e0e2e8",
+    "surfaceVariant": "#42474e",
+    "surfaceVariantText": "#c2c7cf",
+    "surfaceTint": "#8ab4f8",
+    "background": "#000000",
+    "backgroundText": "#e0e2e8",
+    "outline": "#8c9199",
+    "surfaceContainerLowest": "#000000",
+    "surfaceContainerLow": "#191c20",
+    "surfaceContainer": "#1d2024",
+    "surfaceContainerHigh": "#272a2f",
+    "surfaceContainerHighest": "#32353a"
+  },
+  "light": {
+    "name": "Blue Light",
+    "primary": "#1976d2",
+    "primaryText": "#ffffff",
+    "primaryContainer": "#e3f2fd",
+    "secondary": "#42a5f5",
+    "surface": "#f7f9ff",
+    "surfaceText": "#181c20",
+    "surfaceVariant": "#dcecff",
+    "surfaceVariantText": "#42474e",
+    "surfaceTint": "#1976d2",
+    "background": "#f7f9ff",
+    "backgroundText": "#181c20",
+    "outline": "#72777f",
+    "surfaceContainerLowest": "#f9fbff",
+    "surfaceContainerLow": "#edf6ff",
+    "surfaceContainer": "#e3f2fd",
+    "surfaceContainerHigh": "#d9ecff",
+    "surfaceContainerHighest": "#cfe5ff"
+  },
+  "provenance": {
+    "derived_from": "Dux Shell stock Blue palette",
+    "source": "https://github.com/duxlabs-dev/dux-shell",
+    "license": "GPL-3.0-or-later"
+  }
+}

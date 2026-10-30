@@ -1,0 +1,25 @@
+# Build products and Python caches
+/build/
+**/build/
+**/build-*/
+**/__pycache__/
+*.py[cod]
+*.so
+*.o
+CMakeCache.txt
+compile_commands.json
+
+# Never version runtime/private desktop state
+/state/
+/cache/
+/generated/
+/backups/
+/private/
+/local/
+/sandbox*/
+*.katesession
+*.drawy
+*.autosave
+*.log
+.env
+.env.*

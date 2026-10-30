@@ -1,0 +1,6 @@
+[KDE]
+widgetStyle=DrawyGlass
+
+[Canvas]
+BackgroundColorLight=247,249,255,128
+BackgroundColorDark=0,0,0,128

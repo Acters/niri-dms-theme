@@ -1,0 +1,14 @@
+[Common]
+ShadowStrength=51
+
+[Style]
+DolphinSidebarOpacity=15
+DolphinViewOpacity=15
+MenuBarOpacity=15
+MenuOpacity=15
+TabBarOpacity=15
+ToolBarOpacity=15
+WidgetDrawShadow=false
+
+[Windeco]
+BlurTransparentTitleBar=true

@@ -1,0 +1,192 @@
+{
+  "schema": 1,
+  "id": "niri-dms-glass",
+  "name": "Niri + DMS Glass Theme",
+  "version": "0.1.0",
+  "environment": {
+    "XDG_CURRENT_DESKTOP": "niri",
+    "QT_QPA_PLATFORM": "wayland",
+    "QT_QPA_PLATFORMTHEME": "qtengine",
+    "QT_QPA_PLATFORMTHEME_QT6": "qtengine",
+    "QT_STYLE_OVERRIDE": "Darkly",
+    "QTENGINE_CONFIG": "@PROFILE_CONFIG@/qtengine.json",
+    "QT_PLUGIN_PATH": "@PLUGIN_ROOT@",
+    "XDG_DATA_DIRS": "@MERGED_DATA_DIRS@",
+    "XDG_CONFIG_DIRS": "@MERGED_CONFIG_DIRS@",
+    "NIRI_DMS_THEME_PROFILE": "niri-dms-glass",
+    "NIRI_DMS_THEME_CONFIG_HOME": "@PROFILE_CONFIG@",
+    "NIRI_DMS_THEME_DATA_HOME": "@PROFILE_DATA@"
+  },
+  "builds": [
+    {
+      "name": "kate",
+      "source": "plugins/kate-balanced-glass",
+      "build_dir": "build/kate",
+      "artifact": "build/kate/katebalancedglassplugin.so"
+    },
+    {
+      "name": "drawy",
+      "source": "plugins/drawy-glass-style",
+      "build_dir": "build/drawy",
+      "artifact": "build/drawy/plugins/styles/drawyglassstyle.so"
+    }
+  ],
+  "files": [
+    {
+      "source": "assets/dms/blue-black.json",
+      "target": "@PROFILE_CONFIG@/dms/blue-black.json",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/qt/qtengine.json.in",
+      "target": "@PROFILE_CONFIG@/qtengine.json",
+      "render": true,
+      "executable": false
+    },
+    {
+      "source": "assets/qt/translucent.colors.in",
+      "target": "@PROFILE_CONFIG@/matugen/translucent.colors.in",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/dms/matugen-registration.toml.in",
+      "target": "@PROFILE_CONFIG@/integration/matugen-registration.toml",
+      "render": true,
+      "executable": false
+    },
+    {
+      "source": "assets/darkly/darklyrc",
+      "target": "@PROFILE_CONFIG@/shared/darklyrc",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/kate/katebalancedglassrc",
+      "target": "@PROFILE_CONFIG@/shared/katebalancedglassrc",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/kate/plugin-enable.ini",
+      "target": "@PROFILE_CONFIG@/integration/kate-plugin.ini",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/kate/BalancedGlassLight.theme",
+      "target": "@PROFILE_SHARE@/org.kde.syntax-highlighting/themes/BalancedGlassLight.theme",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/kate/BalancedGlassDark.theme",
+      "target": "@PROFILE_SHARE@/org.kde.syntax-highlighting/themes/BalancedGlassDark.theme",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/kate/TomorrowNightBright.theme",
+      "target": "@PROFILE_SHARE@/org.kde.syntax-highlighting/themes/TomorrowNightBright.theme",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/drawy/drawyrc",
+      "target": "@PROFILE_CONFIG@/apps/drawy/drawyrc",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/drawy/darklyrc",
+      "target": "@PROFILE_CONFIG@/apps/drawy/darklyrc",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "assets/drawy/drawy-glass",
+      "target": "@PROFILE_DATA@/bin/drawy-glass",
+      "render": false,
+      "executable": true
+    },
+    {
+      "source": "assets/drawy/DrawyGlass.desktop.in",
+      "target": "@PROFILE_CONFIG@/integration/DrawyGlass.desktop",
+      "render": true,
+      "executable": false
+    },
+    {
+      "source": "session/niri.service.conf.in",
+      "target": "@PROFILE_CONFIG@/integration/niri.service.conf",
+      "render": true,
+      "executable": false
+    },
+    {
+      "source": "session/dms.service.conf.in",
+      "target": "@PROFILE_CONFIG@/integration/dms.service.conf",
+      "render": true,
+      "executable": false
+    },
+    {
+      "source": "session/legacy-manager-bridge.conf.in",
+      "target": "@PROFILE_CONFIG@/integration/legacy-manager-bridge.conf",
+      "render": true,
+      "executable": false
+    },
+    {
+      "source": "session/theme-session",
+      "target": "@PROFILE_DATA@/bin/theme-session",
+      "render": false,
+      "executable": true
+    },
+    {
+      "source": "themekit/__init__.py",
+      "target": "@PROFILE_DATA@/lib/themekit/__init__.py",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "themekit/session.py",
+      "target": "@PROFILE_DATA@/lib/themekit/session.py",
+      "render": false,
+      "executable": false
+    },
+    {
+      "source": "build/kate/katebalancedglassplugin.so",
+      "target": "@PLUGIN_ROOT@/kf6/ktexteditor/katebalancedglassplugin.so",
+      "render": false,
+      "executable": true
+    },
+    {
+      "source": "build/drawy/plugins/styles/drawyglassstyle.so",
+      "target": "@PLUGIN_ROOT@/styles/drawyglassstyle.so",
+      "render": false,
+      "executable": true
+    }
+  ],
+  "palette": {
+    "theme_source": "assets/dms/blue-black.json",
+    "template_source": "assets/qt/translucent.colors.in",
+    "target": "@PROFILE_DATA@/generated/DankMatugenTranslucent.colors"
+  },
+  "binaries": [
+    "python3",
+    "cmake",
+    "ninja",
+    "c++",
+    "niri",
+    "dms"
+  ],
+  "tested_versions": {
+    "qt": "6.12.0",
+    "kde_frameworks": "6.31.0",
+    "kate": "26.08.2",
+    "darkly": "0.5.42",
+    "drawy": "1.0.2",
+    "qtengine": "r47.gc6b3f92",
+    "dux_shell": "2.0.0.r129.g3b63f55",
+    "niri": "26.04.r224.g9d8f4f8"
+  },
+  "activation": "Manual review required; install deploys owned files only, not live hooks or application preferences."
+}

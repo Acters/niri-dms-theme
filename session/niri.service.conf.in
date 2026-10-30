@@ -1,0 +1,3 @@
+# Process-local only: install as a niri.service drop-in AFTER migration review.
+[Service]
+EnvironmentFile=-"@PROFILE_CONFIG@/session.env"

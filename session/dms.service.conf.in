@@ -1,0 +1,8 @@
+# Process-local only: install as a dms.service drop-in AFTER migration review.
+[Unit]
+PartOf=niri.service
+Requisite=niri.service
+After=niri.service
+
+[Service]
+EnvironmentFile=-"@PROFILE_CONFIG@/session.env"

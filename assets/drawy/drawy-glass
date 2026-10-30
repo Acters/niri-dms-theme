@@ -1,0 +1,23 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+set -eu
+desktop=$(printf '%s' "${XDG_CURRENT_DESKTOP-}" | tr '[:upper:]' '[:lower:]')
+case ":$desktop:" in *:niri:*) in_niri=true;; *) in_niri=false;; esac
+if [ "${NIRI_DMS_THEME_PROFILE-}" != niri-dms-glass ] || [ "$in_niri" != true ]; then
+    exec /usr/bin/drawy "$@"
+fi
+CONFIG_ROOT=${NIRI_DMS_THEME_CONFIG_HOME:?Missing theme profile configuration root}
+DATA_ROOT=${NIRI_DMS_THEME_DATA_HOME:?Missing theme profile data root}
+OLD_CONFIG=${XDG_CONFIG_HOME:-$HOME/.config}
+OLD_DATA=${XDG_DATA_HOME:-$HOME/.local/share}
+OLD_CACHE=${XDG_CACHE_HOME:-$HOME/.cache}
+OLD_STATE=${XDG_STATE_HOME:-$HOME/.local/state}
+export XDG_CONFIG_HOME="$CONFIG_ROOT/apps/drawy"
+export XDG_CONFIG_DIRS="$OLD_CONFIG:${XDG_CONFIG_DIRS:-/etc/xdg}"
+export XDG_DATA_HOME="$DATA_ROOT/apps/drawy/data"
+export XDG_DATA_DIRS="$OLD_DATA:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
+export XDG_CACHE_HOME="$OLD_CACHE/niri-dms-theme/apps/drawy"
+export XDG_STATE_HOME="$OLD_STATE/niri-dms-theme/apps/drawy"
+export QT_STYLE_OVERRIDE=DrawyGlass
+mkdir -p "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$XDG_CACHE_HOME" "$XDG_STATE_HOME"
+exec /usr/bin/drawy "$@"

@@ -1,0 +1,9 @@
+#!/usr/bin/env python3
+"""Run directly from this checkout, without installation or PYTHONPATH."""
+from pathlib import Path
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from themekit.cli import main
+
+raise SystemExit(main())

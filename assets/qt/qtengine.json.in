@@ -1,0 +1,12 @@
+{
+  "misc": {
+    "dialogTheme": "xdgdesktopportal",
+    "menusHaveIcons": true,
+    "shortcutsForContextMenus": true,
+    "singleClickActivate": false
+  },
+  "theme": {
+    "colorScheme": "@PROFILE_DATA@/generated/DankMatugenTranslucent.colors",
+    "style": "Darkly"
+  }
+}
