@@ -1,55 +1,52 @@
-# Niri + DMS glass theme kit
+# Niri + DMS glass theme
 
-A session-aware theme bundle for Niri/Dux Shell: pale-blue light surfaces, black dark surfaces, translucent Qt widgets, balanced Kate editor themes, and an opt-in rounded Drawy profile.
+A shared liquid-glass-inspired material for Qt6 controls, with balanced Kate editor backgrounds and a separate Drawy canvas profile.
 
-**This repository does not migrate the running desktop automatically.** The existing setup is preserved. Installation stages only files in dedicated `niri-dms-theme` directories; activating the supplied service/config fragments is a separate, reviewed step. Source: [Acters/niri-dms-theme](https://github.com/Acters/niri-dms-theme).
-
-## What's here
-
-- [DMS palette](assets/dms/blue-black.json) and [Matugen Qt template](assets/qt/translucent.colors.in): 10% background alpha; normal text stays opaque.
-- [Kate plugin](plugins/kate-balanced-glass/): balanced light/dark editor themes, roughly 64% text-row opacity, live switching and new/split views. It is inactive unless the `niri-dms-glass` marker **and** a Niri desktop context are present.
-- [Drawy style adapter](plugins/drawy-glass-style/): 16px outer containers, stock Darkly rendering, and a narrowly version-guarded cleanup for Drawy 1.0.2's unused zoom-area hamburger.
-- [Drawy wrapper](assets/drawy/drawy-glass): opt-in app profile with separate config/data/cache/state. Outside the marked Niri session it launches native Drawy without those overrides.
-- [Session tooling](docs/session.md), process-local service drop-in templates, dry-run installation, private transaction backups, and drift-protected rollback.
-
-No package patches, polling daemon, or full copies of personal desktop configuration are required.
-
-## Preview the plan
-
-Requirements: Python 3.10+, CMake, Ninja, a C++17 compiler, Qt6 Widgets/Test, KF6 TextEditor/CoreAddons/Config development files, Darkly, qtengine, Niri and DMS. Drawy is needed to use its optional launcher. See [tested versions and captured scope](docs/inventory.md).
+## See it
 
 ```sh
-./bin/themekit plan
-./bin/themekit doctor
-./bin/themekit build
-./bin/themekit install             # dry-run, even after building
+./bin/themekit preview drawy
+./bin/themekit preview kate
+./bin/themekit preview dolphin
 ```
 
-To test deployment without touching your home:
+That builds the needed helper if necessary and **opens the app** with an isolated profile. No environment variables or temporary-home setup to do yourself. Close the window when finished. Its directory is printed and kept, so save artwork outside it if you want to keep it permanently.
+
+To choose the appearance or reuse an earlier temporary home:
 
 ```sh
-TEST_HOME=$(mktemp -d)
-./bin/themekit install --home "$TEST_HOME" --mode light --apply
-./bin/themekit rollback --home "$TEST_HOME" --apply
+./bin/themekit preview drawy --mode light
+./bin/themekit preview kate --home /path/to/your/temp-home
 ```
 
-An explicit `--home` relocates **all** XDG roots and ignores ambient XDG paths. It is not a chroot: do not start real desktop services against a test installation.
+A preview uses the selected light/dark palette without changing DMS or normal app preferences. Inside Niri, a temporary rule normalizes only the preview window's backdrop and is removed on exit. If Niri isn't available, the style still opens without that compositor effect.
 
-When ready, `./bin/themekit install --apply` copies only owned resources under the selected XDG config/data roots. It does **not** enable units, edit main Niri/DMS preferences, import manager/D-Bus environment, restart services, enable Kate session plugins, replace desktop entries, or change drawing exports. Review [migration](docs/migration.md) before activation.
+## Use it normally
 
-## Session isolation
-
-The default is process-local `EnvironmentFile` settings on Niri and DMS. The generated Niri fragment supplies the same environment to compositor-spawned applications. Do not put profile-forcing variables into user-wide `environment.d` files.
-
-The user manager and activation bus are shared by all sessions for one UID. An optional manager bridge snapshots/restores only its owned values; it cannot make concurrent DEs fully independent. It is not enabled by the default templates and never mutates D-Bus activation environment.
-
-## Tests and rollback
+From a configured Niri + DMS session:
 
 ```sh
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -v
-./tools/test-plugins
+./bin/themekit install
 ```
 
-`rollback` is dry-run unless `--apply` is supplied. It restores the latest transaction only if targets still match the installed hashes. It refuses drift, including a generated palette changed by DMS: do not force-delete newer data. Disable manually activated integrations before rolling back their resources. See [safety](docs/safety.md).
+This builds the helpers, selects the shared **NiriGlass** style, connects DMS palette generation, installs scoped Kate/Dolphin/Drawy backdrop rules, enables Kate's plugin for existing sessions, and adds a **Drawy Glass** launcher. DMS is refreshed if it is running; Niri and your app windows are not closed. Reopen apps/terminals once to pick up the environment. If Kate was running during installation, enable **Balanced Glass** in **Settings → Configure Kate → Plugins → Apply**; the running session can otherwise save its old disabled state back. Kate then follows light/dark changes live. Your font and session preferences are retained.
 
-Original upstream theme credits/licenses are retained; [NOTICE](NOTICE.md) describes mixed asset provenance. Generated colors, binaries, user session files, screenshots, artwork, caches and transaction state are not source material.
+```sh
+./bin/themekit restore
+```
+
+Restore removes this activation and restores the settings it changed. Unrelated preferences and app data are kept. Backups are private user state, not files in this repo. Add `--dry-run` to install or restore if you want to inspect changes first.
+
+Run as your desktop user, **not sudo**. You need Darkly, qtengine, Niri/DMS, CMake, a C++ compiler, Qt6 development files and the KDE TextEditor/CoreAddons/Config SDK. The chosen app must be installed to preview it. Missing build dependencies stop before desktop settings are changed.
+
+## Important details
+
+- The shared Qt material adds restrained sheen/rims to suitable control surfaces, not text or drawing content. Backdrop saturation is left to Niri; the managed apps retain blur and noise 0.008. This is not refractive lens distortion; GTK/Electron/QML controls need their own styling.
+- The profile is scoped to Niri/DMS processes; there is no recurring global manager-environment bridge.
+- Existing application windows cannot have their inherited environment rewritten. Reopen them after installation/restoration. Pre-existing D-Bus activation overrides may still require a fresh login; this tool does not restart your bus.
+- Drawy's translucent canvas also affects PNG/SVG/clipboard backgrounds. Normal Drawy remains available; use **Drawy Glass** when you want this profile.
+- Editor/container opacity is layered; the exact appearance can vary by widget. The original syntax themes are retained.
+
+[Implementation and limits](docs/notes.md) · [Theme credits/licenses](NOTICE.md)
+
+Developer checks: `python3 -m unittest discover -s tests -v` and `./tools/test-plugins`. Source: [Acters/niri-dms-theme](https://github.com/Acters/niri-dms-theme).

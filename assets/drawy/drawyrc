@@ -1,5 +1,5 @@
 [KDE]
-widgetStyle=DrawyGlass
+widgetStyle=NiriGlass
 
 [Canvas]
 BackgroundColorLight=247,249,255,128

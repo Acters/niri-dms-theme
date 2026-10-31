@@ -1,5 +1,0 @@
-# OPTIONAL legacy bridge, NOT part of the default activation design.
-# The user manager is shared across sessions. Read docs/session.md before use.
-[Service]
-ExecStartPost="@PROFILE_DATA@/bin/theme-session" manager-enter --env-file "@PROFILE_CONFIG@/session.env"
-ExecStopPost="@PROFILE_DATA@/bin/theme-session" manager-leave

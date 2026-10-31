@@ -1,0 +1,20 @@
+// SPDX-License-Identifier: MIT
+// Shared backdrop treatment, only for the apps managed by this theme.
+window-rule {
+    match app-id=r#"^(org\.kde\.)?(kate|dolphin|drawy)$"#
+    opacity 1.0
+    draw-border-with-background false
+    background-effect {
+        blur true
+        xray false
+        noise 0.008
+    }
+    popups {
+        opacity 1.0
+        background-effect {
+            blur true
+            xray false
+            noise 0.008
+        }
+    }
+}

@@ -1,8 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Drawy (Glass, Niri)
-Comment=Session-scoped balanced glass canvas; exports can have alpha
-Exec="@PROFILE_DATA@/bin/drawy-glass" %f
-Icon=drawy
-Categories=Qt;KDE;Graphics;
-OnlyShowIn=niri;

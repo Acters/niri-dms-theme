@@ -1,6 +1,6 @@
 # Licenses and provenance
 
-Original deployment/session tooling, the small Kate adapter and the Drawy Qt style adapter are provided under the repository MIT license unless a file says otherwise.
+Original deployment/session tooling, the small Kate adapter and the shared Qt glass style are provided under the repository MIT license unless a file says otherwise.
 
 Third-party-derived theme assets retain their own provenance:
 

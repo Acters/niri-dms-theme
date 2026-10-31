@@ -1,33 +1,29 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Build and exercise both helpers with an isolated temporary home and offscreen Qt."""
+"""Exercise both helpers offscreen without changing desktop configuration."""
 from pathlib import Path
 import os
 import subprocess
 import sys
 import tempfile
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
-from themekit.session import parse_env_file
+ROOT=Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
+from themekit.app import atomic_write,build_plugins,environment,resources
+from themekit.paths import context
 
-subprocess.run([str(ROOT/'bin/themekit'), 'build'], check=True)
-home = Path(tempfile.mkdtemp(prefix='niri-dms-plugin-test-'))
-subprocess.run([str(ROOT/'bin/themekit'), 'install', '--home', str(home), '--apply'], check=True)
-config = home/'.config/niri-dms-theme'
-data = home/'.local/share/niri-dms-theme'
-env = os.environ.copy()
-env.update(parse_env_file(config/'session.env'))
-env.update(HOME=str(home), XDG_CONFIG_HOME=str(home/'.config'), XDG_DATA_HOME=str(home/'.local/share'),
-           XDG_STATE_HOME=str(home/'.local/state'), XDG_CACHE_HOME=str(home/'.cache'), QT_QPA_PLATFORM='offscreen')
-env.pop('QTENGINE_CONFIG', None)
-env['QTENGINE_CONFIG'] = str(config/'qtengine.json')
-build = ROOT/'build/kate-tests'
-subprocess.run(['cmake','-S',str(ROOT/'plugins/kate-balanced-glass/tests'),'-B',str(build),'-G','Ninja','-DCMAKE_BUILD_TYPE=Release'],check=True)
-subprocess.run(['cmake','--build',str(build),'-j2'],check=True)
-env['BALANCED_GLASS_PLUGIN'] = str(data/'qt-plugins/kf6/ktexteditor/katebalancedglassplugin.so')
+build_plugins(('glass','kate'))
+home=Path(tempfile.mkdtemp(prefix='niri-dms-plugin-test-'))
+ctx=context(str(home))
+for item in resources(ctx,'dark'): atomic_write(item,home)
+env=os.environ.copy(); env.update(environment(ctx))
+env.update(HOME=str(home),XDG_CONFIG_HOME=ctx['CONFIG_HOME'],XDG_DATA_HOME=ctx['DATA_HOME'],XDG_STATE_HOME=ctx['STATE_HOME'],XDG_CACHE_HOME=ctx['CACHE_HOME'],QT_QPA_PLATFORM='offscreen')
+build=ROOT/'build/kate-tests'
+subprocess.run(['cmake','-S',str(ROOT/'plugins/kate-balanced-glass/tests'),'-B',str(build),'-DCMAKE_BUILD_TYPE=Release'],check=True)
+subprocess.run(['cmake','--build',str(build),'--parallel','2'],check=True)
+env['BALANCED_GLASS_PLUGIN']=str(Path(ctx['PLUGIN_ROOT'])/'kf6/ktexteditor/katebalancedglassplugin.so')
 subprocess.run([str(build/'balancedglass-test')],env=env,check=True)
-env['QT_STYLE_OVERRIDE'] = 'DrawyGlass'
-subprocess.run([str(ROOT/'build/drawy/style-test')],env=env,check=True)
-subprocess.run([str(ROOT/'bin/themekit'),'rollback','--home',str(home),'--apply'],check=True)
-print('PASS: scoped helpers and isolated deployment/rollback; no live deployment or service restart performed')
+env['QT_STYLE_OVERRIDE']='NiriGlass'
+env['NIRI_GLASS_TEST_HOME']='1'
+subprocess.run([str(ROOT/'build/glass/style-test')],env=env,check=True)
+print('PASS: scoped helper tests; no live installation or service restart')
