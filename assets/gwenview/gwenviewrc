@@ -1,0 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Gwenview rebuilds page palettes through KColorSchemeManager, independently of
+# the Qt platform palette. This is a cascaded default; explicit user choices win.
+[UiSettings]
+ColorScheme=DankMatugenTranslucent

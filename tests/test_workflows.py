@@ -24,6 +24,8 @@ class WorkflowTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         self.repo = self.root / "repo"
         shutil.copytree(ROOT / "assets", self.repo / "assets")
+        (self.repo / "themekit").mkdir()
+        shutil.copy2(ROOT / "themekit/quickstyle.py", self.repo / "themekit/quickstyle.py")
         for name, (_, _, artifact, _) in app.PLUGINS.items():
             target = self.repo / artifact
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -56,10 +58,135 @@ class WorkflowTests(unittest.TestCase):
         ctx = context(str(self.home))
         self.assertTrue((Path(ctx["PROFILE_CONFIG"]) / "session.env").is_file())
         self.assertTrue((self.home / ".config/niri/config.kdl").is_file())
-        palette = Path(ctx["PROFILE_DATA"]) / "generated/DankMatugenTranslucent.colors"
+        palette = Path(ctx["PROFILE_SHARE"]) / "color-schemes/DankMatugenTranslucent.colors"
         self.assertIn("237,246,255,26", palette.read_text())
         self.assertEqual(app.main(["restore", "--home", str(self.home)]), 0)
         self.assertEqual(preference.read_text(), "keep me")
+
+    def test_filelight_launcher_updates_only_owned_keys_and_restores_existing_entry(self):
+        self.seed_niri()
+        desktop = self.home / '.local/share/applications/org.kde.filelight.desktop'
+        desktop.parent.mkdir(parents=True)
+        original = '[Desktop Entry]\nType=Application\nName=My Filelight\nName[fr]=Mon Filelight\nExec=filelight --custom %u\nDBusActivatable=true\nIcon=my-icon\n'
+        desktop.write_text(original)
+        args = ['install', '--home', str(self.home), '--mode', 'light']
+        self.assertEqual(app.main(args), 0)
+        installed = desktop.read_text()
+        self.assertIn('bin/filelight-glass', installed)
+        self.assertIn('DBusActivatable=false', installed)
+        for line in ('Name=My Filelight', 'Name[fr]=Mon Filelight', 'Icon=my-icon'):
+            self.assertIn(line, installed)
+        self.assertEqual(app.main(args), 0)
+        self.assertEqual(desktop.read_text(), installed)
+        self.assertEqual(app.main(['restore', '--home', str(self.home)]), 0)
+        self.assertEqual(desktop.read_text(), original)
+
+    def test_new_filelight_launcher_is_removed_on_restore_even_after_reinstall(self):
+        self.seed_niri()
+        args = ['install', '--home', str(self.home), '--mode', 'dark']
+        self.assertEqual(app.main(args), 0)
+        desktop = self.home / '.local/share/applications/org.kde.filelight.desktop'
+        first = desktop.read_text()
+        self.assertEqual(app.main(args), 0)
+        self.assertEqual(desktop.read_text(), first)
+        self.assertEqual(app.main(['restore', '--home', str(self.home)]), 0)
+        self.assertFalse(desktop.exists())
+
+    def test_filelight_restore_preserves_later_edits_to_seeded_launcher_keys(self):
+        self.seed_niri()
+        self.assertEqual(app.main(['install', '--home', str(self.home), '--mode', 'light']), 0)
+        desktop = self.home / '.local/share/applications/org.kde.filelight.desktop'
+        from themekit.integrate import _patch
+        changed = {'Exec': 'Exec=my-filelight %u\n', 'Name': 'Name=My choice\n',
+                   'Type': 'Type=Application\n', 'Icon': 'Icon=my-icon\n'}
+        text, _ = _patch(desktop.read_bytes(), 'desktop', changed)
+        desktop.write_bytes(text)
+        with self.assertWarns(RuntimeWarning):
+            self.assertEqual(app.main(['restore', '--home', str(self.home)]), 0)
+        for line in changed.values():
+            self.assertIn(line.strip(), desktop.read_text())
+        self.assertNotIn('bin/filelight-glass', desktop.read_text())
+
+    def test_partial_filelight_desktop_entry_is_completed_without_replacing_metadata(self):
+        self.seed_niri()
+        desktop = self.home / '.local/share/applications/org.kde.filelight.desktop'
+        desktop.parent.mkdir(parents=True)
+        original = '[Desktop Entry]\nName=Custom Filelight\n'
+        desktop.write_text(original)
+        self.assertEqual(app.main(['install', '--home', str(self.home), '--mode', 'light']), 0)
+        self.assertIn('Name=Custom Filelight', desktop.read_text())
+        self.assertIn('Type=Application', desktop.read_text())
+        self.assertIn(' %u', desktop.read_text())
+        self.assertNotIn(' %U', desktop.read_text())
+        self.assertEqual(app.main(['restore', '--home', str(self.home)]), 0)
+        self.assertEqual(desktop.read_text(), original)
+
+    def test_filelight_restore_retains_later_launcher_metadata_with_stock_exec(self):
+        self.seed_niri()
+        self.assertEqual(app.main(['install', '--home', str(self.home), '--mode', 'light']), 0)
+        desktop = self.home / '.local/share/applications/org.kde.filelight.desktop'
+        desktop.write_text(desktop.read_text() + 'Keywords=mine;\n')
+        self.assertEqual(app.main(['restore', '--home', str(self.home)]), 0)
+        text = desktop.read_text()
+        self.assertIn('Keywords=mine;', text)
+        self.assertIn('Exec=filelight %u', text)
+        self.assertNotIn('bin/filelight-glass', text)
+        self.assertIn('Name=Filelight', text)
+
+    def test_new_app_previews_are_isolated_and_do_not_integrate(self):
+        for name in ('filelight', 'gwenview'):
+            home = self.root / (name + '-home')
+            with patch.object(app, 'wait_for_app', return_value=0) as launch:
+                self.assertEqual(app.main(['preview', name, '--home', str(home), '--mode', 'light']), 0)
+                command, env = launch.call_args.args
+            self.assertEqual(env['HOME'], str(home))
+            self.assertFalse((home / '.config/niri').exists())
+            self.assertFalse((home / '.local/share/applications/org.kde.filelight.desktop').exists())
+            if name == 'filelight':
+                self.assertTrue(command[0].endswith('/bin/filelight-glass'))
+                self.assertTrue(Path(command[1]).is_dir())
+                self.assertEqual(command[2:4], ['--desktopfile', 'org.kde.filelight.niri-glass-preview'])
+            else:
+                self.assertEqual(command[:3], ['gwenview', '--desktopfile', 'org.kde.gwenview.niri-glass-preview'])
+                self.assertTrue(list(Path(command[-1]).glob('*.svg')))
+
+    def test_gwenview_uses_one_discoverable_scheme_without_editing_user_preferences(self):
+        self.seed_niri()
+        user = self.home / ".config/gwenviewrc"
+        original = "[UiSettings]\nColorScheme=BreezeDark\n[ThumbnailView]\nThumbnailSize=116\n"
+        user.write_text(original)
+        self.assertEqual(app.main(["install", "--home", str(self.home), "--mode", "dark"]), 0)
+        ctx = context(str(self.home))
+        scheme = Path(ctx["PROFILE_SHARE"]) / "color-schemes/DankMatugenTranslucent.colors"
+        engine = json.loads((Path(ctx["PROFILE_CONFIG"]) / "qtengine.json").read_text())
+        self.assertEqual(engine["theme"]["colorScheme"], str(scheme))
+        self.assertTrue(scheme.is_file())
+        self.assertFalse((Path(ctx["PROFILE_DATA"]) / "generated/DankMatugenTranslucent.colors").exists())
+        self.assertIn("ColorScheme=DankMatugenTranslucent", (Path(ctx["PROFILE_CONFIG"]) / "shared/gwenviewrc").read_text())
+        matugen = (self.home / ".config/matugen/dms/configs/niri-dms-theme.toml").read_text()
+        self.assertIn(str(scheme), matugen)
+        self.assertEqual(user.read_text(), original)
+        self.assertEqual(app.main(["restore", "--home", str(self.home)]), 0)
+        self.assertEqual(user.read_text(), original)
+        self.assertFalse(scheme.exists())
+
+    def test_upgrade_retains_retired_palette_for_old_clients_and_restore_cleans_both(self):
+        self.seed_niri()
+        ctx = context(str(self.home))
+        legacy = Path(ctx['PROFILE_DATA']) / 'generated/DankMatugenTranslucent.colors'
+        resources = app.resources(ctx, 'light')
+        palette = next(item for item in resources if item.path.name == 'DankMatugenTranslucent.colors')
+        resources.append(app.Resource(legacy, palette.data, generated=True))
+        app.integrate.apply(ctx, resources, app.environment(ctx), live=False)
+        self.assertEqual(app.main(['install', '--home', str(self.home), '--mode', 'dark']), 0)
+        canonical = Path(ctx['PROFILE_SHARE']) / 'color-schemes/DankMatugenTranslucent.colors'
+        self.assertTrue(legacy.is_file())
+        self.assertTrue(canonical.is_file())
+        engine = json.loads((Path(ctx['PROFILE_CONFIG']) / 'qtengine.json').read_text())
+        self.assertEqual(engine['theme']['colorScheme'], str(canonical))
+        self.assertEqual(app.main(['restore', '--home', str(self.home)]), 0)
+        self.assertFalse(legacy.exists())
+        self.assertFalse(canonical.exists())
 
     def test_install_restore_summaries_and_dry_run_paths(self):
         self.seed_niri()
@@ -68,7 +195,7 @@ class WorkflowTests(unittest.TestCase):
         backup = Path(ctx["STATE_HOME"]) / "niri-dms-theme/backup.json"
         self.assertIn("Installed:", self.output.getvalue())
         self.assertIn(str(backup), self.output.getvalue())
-        self.assertIn("Reopen Kate, Dolphin and Drawy once", self.output.getvalue())
+        self.assertIn("Reopen Kate, Dolphin, Gwenview, Filelight and Drawy once", self.output.getvalue())
         self.assertIn("no live services changed", self.output.getvalue())
         self.output.seek(0)
         self.output.truncate()
@@ -94,7 +221,7 @@ class WorkflowTests(unittest.TestCase):
 
     def test_executable_preview_command_launches_fake_kate_with_isolated_environment(self):
         package = self.repo / "themekit"
-        package.mkdir()
+        package.mkdir(exist_ok=True)
         for filename in ("__init__.py", "app.py", "paths.py", "integrate.py", "palette.py", "preview.py"):
             shutil.copy2(ROOT / "themekit" / filename, package / filename)
         binaries = self.repo / "bin"

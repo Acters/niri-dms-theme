@@ -148,7 +148,8 @@ def _patch(data, kind, values):
             else:
                 obj[key] = value
         return (json.dumps(obj, indent=2, ensure_ascii=False) + '\n').encode(), old
-    result, old = _ini(text, values, 'KDE' if kind == 'kde' else 'Kate Plugins')
+    section = {'kde': 'KDE', 'desktop': 'Desktop Entry'}.get(kind, 'Kate Plugins')
+    result, old = _ini(text, values, section)
     return result.encode(), old
 
 
@@ -284,11 +285,25 @@ def apply(ctx, resources: list[Resource], environment: dict[str, str], *, dry_ru
         content += f'[Service]\nEnvironmentFile={envfile}\n'
         specs.append((config / f'systemd/user/{unit}.service.d/50-niri-dms-theme.conf', 'asset', content.encode(), 0o600, False))
     toml = '[templates.niri_dms_glass]\n' + ''.join(f'{key} = {json.dumps(str(value))}\n' for key, value in (
-        ('input_path', profile / 'matugen/translucent.colors.in'), ('output_path', Path(ctx['PROFILE_DATA']) / 'generated/DankMatugenTranslucent.colors')))
+        ('input_path', profile / 'matugen/translucent.colors.in'), ('output_path', Path(ctx['PROFILE_SHARE']) / 'color-schemes/DankMatugenTranslucent.colors')))
     specs.append((config / 'matugen/dms/configs/niri-dms-theme.toml', 'asset', toml.encode(), 0o600, False))
     wrapper = str(Path(ctx['PROFILE_DATA']) / 'bin/drawy-glass')
     desktop = '[Desktop Entry]\nType=Application\nName=Drawy Glass\nExec="' + wrapper.replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%') + '" %F\nIcon=drawy\nCategories=Graphics;\n'
     specs.append((data / 'applications/niri-dms-theme-drawy.desktop', 'asset', desktop.encode(), 0o600, False))
+    # Shadow the normal launcher, changing only launch keys in an existing entry.
+    # DBus activation must not bypass the per-process QML wrapper.
+    filelight = _safe(data / 'applications/org.kde.filelight.desktop', ctx)
+    wrapper = str(Path(ctx['PROFILE_DATA']) / 'bin/filelight-glass')
+    quoted = wrapper.replace('\\', '\\\\').replace('"', '\\"').replace('`', '\\`').replace('$', '\\$').replace('%', '%%')
+    launch = {'Exec': f'Exec="{quoted}" %u\n', 'DBusActivatable': 'DBusActivatable=false\n'}
+    defaults = {key: f'{key}={value}\n' for key, value in {
+        'Type': 'Application', 'Name': 'Filelight', 'Icon': 'filelight',
+        'TryExec': 'filelight', 'MimeType': 'inode/directory;', 'Categories': 'Qt;KDE;Utility;'
+    }.items()}
+    _, present = _patch(filelight.read_bytes() if filelight.exists() else b'',
+                        'desktop', {key: None for key in defaults})
+    launch.update({key: line for key, line in defaults.items() if key not in present})
+    specs.append((filelight, 'desktop', launch, 0o600, False))
     sessions = [data / 'kate/anonymous.katesession']
     sessiondir = data / 'kate/sessions'
     if sessiondir.exists():
@@ -341,6 +356,8 @@ def apply(ctx, resources: list[Resource], environment: dict[str, str], *, dry_ru
                 record['keys'].append(key)
                 if key in original:
                     record['original'][key] = original[key]
+        if oldrecord and kind == 'desktop':
+            value = {**record['installed'], **value}
         record['installed'] = value if kind == 'include' or isinstance(value, dict) else None
         record['after'] = _hash(result)
         records[str(path)] = record
@@ -414,6 +431,15 @@ def restore(ctx, *, dry_run=False, live=False):
             # Avoid leaving a newly created JSON config when it has no other keys.
             if before is None and kind == 'json' and json.loads(result) == {}:
                 result = None
+            if before is None and kind == 'desktop':
+                if result.strip() == b'[Desktop Entry]':
+                    result = None
+                elif result:
+                    # Keep later user additions runnable without our removed wrapper.
+                    defaults = {'Exec': 'Exec=filelight %u\n', 'Type': 'Type=Application\n',
+                                'Name': 'Name=Filelight\n', 'Icon': 'Icon=filelight\n'}
+                    _, present = _patch(result, 'desktop', {key: None for key in defaults})
+                    result, _ = _patch(result, 'desktop', {key: line for key, line in defaults.items() if key not in present})
         if result != raw or (result is None and current is not None):
             changes.append((path, result, before['mode'] if before else 0o600))
     if dry_run:

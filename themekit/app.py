@@ -27,19 +27,21 @@ PLUGINS = {
     "glass": ("plugins/glass-style", "build/glass",
               "build/glass/plugins/styles/niriglassstyle.so", "styles/niriglassstyle.so"),
 }
-# Source, owned destination, render tokens. No manifest or runtime Python installation.
+# Source, owned destination, render tokens. No manifest or installed Python package.
 FILES = (
     ("assets/niri/material.kdl", "@PROFILE_CONFIG@/niri/material.kdl", False),
     ("assets/dms/blue-black.json", "@PROFILE_CONFIG@/dms/blue-black.json", False),
     ("assets/qt/qtengine.json.in", "@PROFILE_CONFIG@/qtengine.json", True),
     ("assets/qt/translucent.colors.in", "@PROFILE_CONFIG@/matugen/translucent.colors.in", False),
     ("assets/darkly/darklyrc", "@PROFILE_CONFIG@/shared/darklyrc", False),
+    ("assets/gwenview/gwenviewrc", "@PROFILE_CONFIG@/shared/gwenviewrc", False),
     ("assets/kate/katebalancedglassrc", "@PROFILE_CONFIG@/shared/katebalancedglassrc", False),
     *((f"assets/kate/{name}.theme", f"@PROFILE_SHARE@/org.kde.syntax-highlighting/themes/{name}.theme", False)
       for name in ("BalancedGlassLight", "BalancedGlassDark", "TomorrowNightBright")),
     ("assets/drawy/drawyrc", "@PROFILE_CONFIG@/apps/drawy/drawyrc", False),
     ("assets/drawy/darklyrc", "@PROFILE_CONFIG@/apps/drawy/darklyrc", False),
     ("assets/drawy/drawy-glass", "@PROFILE_DATA@/bin/drawy-glass", False),
+    ("themekit/quickstyle.py", "@PROFILE_DATA@/bin/filelight-glass", False),
 )
 
 
@@ -119,7 +121,7 @@ def resources(ctx, mode, names=("glass", "kate"), *, dry_run=False):
         if substitute:
             data = render(data.decode(), ctx).encode()
         result.append(Resource(Path(render(target, ctx)), data,
-                               0o700 if source == "assets/drawy/drawy-glass" else 0o600))
+                               0o700 if source in ("assets/drawy/drawy-glass", "themekit/quickstyle.py") else 0o600))
     for name in names:
         _, _, artifact, target = PLUGINS[name]
         path = REPO / artifact
@@ -131,7 +133,7 @@ def resources(ctx, mode, names=("glass", "kate"), *, dry_run=False):
                                data if data is not None else b"", 0o700))
     palette = render_palette(json.loads((REPO / "assets/dms/blue-black.json").read_text()),
                              (REPO / "assets/qt/translucent.colors.in").read_text(), mode)
-    result.append(Resource(Path(ctx["PROFILE_DATA"]) / "generated/DankMatugenTranslucent.colors",
+    result.append(Resource(Path(ctx["PROFILE_SHARE"]) / "color-schemes/DankMatugenTranslucent.colors",
                            palette.encode(), generated=True))
     env = environment(ctx)
     # systemd EnvironmentFile quoting, not shell commands or a session helper.
@@ -274,6 +276,29 @@ def preview(app, home, mode):
             if not target.exists():
                 atomic_write(Resource(target, data), root)
         command = ["dolphin", "--desktopfile", desktop_id(app), "--new-window", str(sample)]
+    elif app in ("filelight", "gwenview"):
+        sample = Path(ctx["PROFILE_DATA"]) / f"{app}-preview-files"
+        safe_path(sample / ".directory-check", root)
+        sample.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if app == "filelight":
+            for index in range(1, 5):
+                target = safe_path(sample / f"Example {index}.txt", root)
+                if not target.exists():
+                    atomic_write(Resource(target, b"Isolated disk-usage sample.\n" * (index * 1024)), root)
+            # Filelight 26.08 reads argv[1] as the scan URL, before filtering flags.
+            command = [str(Path(ctx["PROFILE_DATA"]) / "bin/filelight-glass"), str(sample),
+                       "--desktopfile", desktop_id(app)]
+        else:
+            target = safe_path(sample / "A long example filename to test readable expanded hover details.svg", root)
+            if not target.exists():
+                # Generate disposable sample artwork; never copy user images or keep
+                # runtime drawings in the source tree.
+                svg = ('<svg xmlns="http://www.w3.org/2000/svg" width="800" height="600">'
+                       '<rect width="800" height="600" fill="#125ecc"/>'
+                       '<circle cx="400" cy="280" r="180" fill="#fa9020"/>'
+                       '<text x="95" y="550" fill="white" font-size="38">NiriGlass preview</text></svg>')
+                atomic_write(Resource(target, svg.encode()), root)
+            command = ["gwenview", "--desktopfile", desktop_id(app), str(sample)]
     else:
         command = [str(Path(ctx["PROFILE_DATA"]) / "bin/drawy-glass"),
                    "--desktopfile", desktop_id(app)]
@@ -301,7 +326,7 @@ def report(command, changes, ctx, dry_run, isolated):
         backup = Path(ctx["STATE_HOME"]) / "niri-dms-theme/backup.json"
         print(f"{'Backup would be' if dry_run else 'Backup'}: {backup}")
         if not dry_run:
-            print("Reopen Kate, Dolphin and Drawy once to load the installed plugins.")
+            print("Reopen Kate, Dolphin, Gwenview, Filelight and Drawy once to load the installed theme.")
     if isolated:
         print("Alternate home: no live services changed.")
 
@@ -312,7 +337,7 @@ def main(argv=None):
     for name in ("install", "preview", "restore"):
         sub = commands.add_parser(name)
         if name == "preview":
-            sub.add_argument("app", choices=("drawy", "kate", "dolphin"))
+            sub.add_argument("app", choices=("drawy", "kate", "dolphin", "filelight", "gwenview"))
         else:
             sub.add_argument("--dry-run", action="store_true")
         sub.add_argument("--home", help="alternate home (preview: empty or reusable isolated home)")

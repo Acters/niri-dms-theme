@@ -6,7 +6,7 @@
     "singleClickActivate": false
   },
   "theme": {
-    "colorScheme": "@PROFILE_DATA@/generated/DankMatugenTranslucent.colors",
+    "colorScheme": "@PROFILE_SHARE@/color-schemes/DankMatugenTranslucent.colors",
     "style": "NiriGlass"
   }
 }

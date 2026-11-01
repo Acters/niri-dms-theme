@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Shared backdrop treatment, only for the apps managed by this theme.
 window-rule {
-    match app-id=r#"^(org\.kde\.)?(kate|dolphin|drawy)$"#
+    match app-id=r#"^(org\.kde\.)?(kate|dolphin|drawy|gwenview|filelight)$"#
     opacity 1.0
     draw-border-with-background false
     background-effect {
