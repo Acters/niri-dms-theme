@@ -15,8 +15,11 @@ import re
 import shlex
 import stat
 import subprocess
+import sys
 import tempfile
 import warnings
+
+from . import portal
 
 
 class Error(ValueError):
@@ -214,34 +217,37 @@ def _save(path, state, ctx):
     _write(path, (json.dumps(state, indent=2) + '\n').encode(), 0o600, ctx)
 
 
-def _manager_environment():
-    result = subprocess.run(['systemctl', '--user', 'show-environment'], check=True,
-                            capture_output=True, text=True)
-    values = {}
-    for line in result.stdout.splitlines():
-        try:
-            parts = shlex.split(line)
-        except ValueError:
-            continue
-        if len(parts) == 1 and '=' in parts[0]:
-            key, value = parts[0].split('=', 1)
-            values[key] = value
-    return values
-
-
-def _old_manager_values(ctx, values):
-    expected = {'QT_QPA_PLATFORMTHEME': 'qtengine', 'QT_QPA_PLATFORMTHEME_QT6': 'qtengine',
-                'QT_PLUGIN_PATH': str(Path(ctx['HOME']) / '.local/lib/qt6/plugins')}
-    return {key: value for key, value in expected.items() if values.get(key) == value}
-
-
 def _services(live):
-    if not live:
-        return
-    subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True)
-    active = subprocess.run(['systemctl', '--user', 'is-active', '--quiet', 'dms.service'], check=False)
-    if active.returncode == 0:
-        subprocess.run(['systemctl', '--user', 'restart', 'dms.service'], check=True)
+    if live:
+        # Activation updates future processes. Never restart the shell or apps.
+        subprocess.run(['systemctl', '--user', 'daemon-reload'], check=True, timeout=10)
+
+
+def _session_action(ctx, action, profile_environment=None):
+    helper = (_safe(Path(ctx['PROFILE_DATA']) / 'bin/niri-theme-session-env', ctx)
+              if action != 'prepare' else Path(__file__).with_name('session_env.py'))
+    runtime = os.environ.get('XDG_RUNTIME_DIR')
+    state = Path(runtime) / 'niri-dms-theme/session-env.json' if runtime else None
+    use_source = action == 'prepare'
+    if not helper.exists():
+        if action != 'deactivate' or not state or not state.exists():
+            return
+        # A failed first install may have prepared a baseline before copying
+        # the runtime helper. The source helper can safely undo that journal.
+        helper = Path(__file__).with_name('session_env.py')
+        if not helper.is_file():
+            raise Error('session cleanup helper is missing; repair before restore')
+        use_source = True
+    env = os.environ.copy()
+    if action in ('prepare', 'activate'):
+        if 'niri' not in env.get('XDG_CURRENT_DESKTOP', '').lower().split(':'):
+            return
+        env.update(profile_environment or {})
+    command = ([sys.executable, str(helper), action] if use_source
+               else [str(helper), action])
+    if action in ('prepare', 'activate'):
+        command.append('--require-active')
+    subprocess.run(command, env=env, check=True, timeout=20)
 
 
 def apply(ctx, resources: list[Resource], environment: dict[str, str], *, dry_run=False, live=False):
@@ -280,10 +286,19 @@ def apply(ctx, resources: list[Resource], environment: dict[str, str], *, dry_ru
         'currentThemeName': 'custom', 'currentThemeCategory': 'custom',
         'customThemeFile': str(profile / 'dms/blue-black.json'), 'matugenTemplateQtengine': False}, 0o600, False))
     envfile = str(profile / 'session.env').replace('%', '%%')
+    session_helper = Path(ctx['PROFILE_DATA']) / 'bin/niri-theme-session-env'
+    has_session_helper = any(Path(item.path) == session_helper for item in resources)
     for unit in ('niri', 'dms'):
         content = ('[Unit]\nPartOf=niri.service\nRequisite=niri.service\nAfter=niri.service\n\n' if unit == 'dms' else '')
-        content += f'[Service]\nEnvironmentFile={envfile}\n'
+        content += f'[Service]\nEnvironmentFile=-{envfile}\n'
+        if unit == 'niri' and has_session_helper:
+            helper = portal.exec_argument(session_helper)
+            content += f'ExecStartPre=-{helper} activate\nExecStopPost=-{helper} deactivate\n'
         specs.append((config / f'systemd/user/{unit}.service.d/50-niri-dms-theme.conf', 'asset', content.encode(), 0o600, False))
+    portal_wrapper = Path(ctx['PROFILE_DATA']) / 'bin' / portal.LAUNCHER
+    if any(Path(item.path) == portal_wrapper for item in resources):
+        specs.append((config / f'systemd/user/{portal.UNIT}.d/50-niri-dms-theme.conf',
+                      'asset', portal.service_dropin(portal_wrapper), 0o600, False))
     toml = '[templates.niri_dms_glass]\n' + ''.join(f'{key} = {json.dumps(str(value))}\n' for key, value in (
         ('input_path', profile / 'matugen/translucent.colors.in'), ('output_path', Path(ctx['PROFILE_SHARE']) / 'color-schemes/DankMatugenTranslucent.colors')))
     specs.append((config / 'matugen/dms/configs/niri-dms-theme.toml', 'asset', toml.encode(), 0o600, False))
@@ -367,30 +382,35 @@ def apply(ctx, resources: list[Resource], environment: dict[str, str], *, dry_ru
     # All parsing, symlink and drift checks happen before the backup or any asset write.
     if dry_run:
         return [str(p) for p, _, _ in changes]
-    legacy_manager = _old_manager_values(ctx, _manager_environment()) if live else {}
-    manager_baseline = state.setdefault('manager', {})
-    for key, value in legacy_manager.items():
-        manager_baseline.setdefault(key, value)
+    # Capture before changing environment.d or re-running environment generators.
+    # This action journals only; it does not alter either activation store.
+    if live and has_session_helper:
+        _session_action(ctx, 'prepare', environment)
+    # Runtime session activation owns its own untouched, per-session baseline.
+    # Do not scrub matching Qt values as legacy before taking that baseline.
     state['records'] = list(records.values())
     state['pending'] = True
     _save(statefile, state, ctx)
     try:
         for path, content, mode in changes:
             _write(path, content, mode, ctx)
-        if legacy_manager:
-            # systemctl unset-environment takes bare names, never NAME=value.
-            subprocess.run(['systemctl', '--user', 'unset-environment', *legacy_manager], check=True)
         state['pending'] = False
         _save(statefile, state, ctx)
     except Exception as exc:
         raise Error(f'install interrupted; originals saved in {statefile}; run restore: {exc}') from exc
     _services(live)
+    if live:
+        _session_action(ctx, 'activate', environment)
     return [str(p) for p, _, _ in changes]
 
 
 def restore(ctx, *, dry_run=False, live=False):
     statefile, state = _state(ctx)
     if not statefile.exists():
+        # Baseline preparation can precede the first backup write. A failed
+        # first install must still be able to discard that unmutated journal.
+        if live and not dry_run:
+            _session_action(ctx, 'deactivate')
         return []
     changes = []
     conflicts = []
@@ -444,11 +464,9 @@ def restore(ctx, *, dry_run=False, live=False):
             changes.append((path, result, before['mode'] if before else 0o600))
     if dry_run:
         return [str(p) for p, _, _ in changes]
-    manager_restore = {}
-    if live and state.get('manager'):
-        current_manager = _manager_environment()
-        manager_restore = {key: value for key, value in _old_manager_values(ctx, state['manager']).items()
-                           if key not in current_manager}
+    if live:
+        # Failure must leave the helper/assets available for a cleanup retry.
+        _session_action(ctx, 'deactivate')
     try:
         for path, content, mode in changes:
             _safe(path, ctx)
@@ -457,9 +475,6 @@ def restore(ctx, *, dry_run=False, live=False):
                     path.unlink()
             else:
                 _write(path, content, mode, ctx)
-        if manager_restore:
-            subprocess.run(['systemctl', '--user', 'set-environment',
-                            *(f'{key}={value}' for key, value in manager_restore.items())], check=True)
         if conflicts:
             state.update(records=conflicts, pending=False, manager={})
             _save(statefile, state, ctx)

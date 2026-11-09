@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MIT
 #include <QApplication>
+#include <QAbstractScrollArea>
 #include <QAction>
 #include <QChildEvent>
 #include <QDockWidget>
@@ -268,6 +269,58 @@ private:
     bool m_relinquished = false;
 };
 
+// Okular paints the surrounding page area with QPalette::Dark but declares
+// its viewport opaque. A translucent brush violates that promise, leaving stale
+// backing-store pixels. Correct only that hint; never paint over PDF content.
+constexpr auto viewportFixName = "_niriOkularViewport";
+static QWidget *pageViewport(QWidget *widget) {
+    if (auto *area = qobject_cast<QAbstractScrollArea *>(widget); area && widget->inherits("PageView"))
+        return area->viewport();
+    if (auto *area = qobject_cast<QAbstractScrollArea *>(widget->parentWidget());
+        area && area->inherits("PageView") && area->viewport() == widget) return widget;
+    return nullptr;
+}
+class TranslucentPageViewport final : public QObject {
+public:
+    explicit TranslucentPageViewport(QWidget *viewport) : QObject(viewport), m_viewport(viewport) {
+        setObjectName(QLatin1String(viewportFixName));
+        viewport->installEventFilter(this);
+        apply();
+    }
+    void restore() {
+        if (!m_active) return;
+        if (!m_viewport->testAttribute(Qt::WA_OpaquePaintEvent))
+            m_viewport->setAttribute(Qt::WA_OpaquePaintEvent, m_opaque);
+        m_active = false;
+        m_viewport->update();
+    }
+protected:
+    bool eventFilter(QObject *, QEvent *event) override {
+        switch (event->type()) {
+        case QEvent::PaletteChange: case QEvent::Show: case QEvent::PolishRequest:
+            apply(); break;
+        default: break;
+        }
+        return false;
+    }
+private:
+    void apply() {
+        if (!activeProfile() || m_viewport->palette().color(QPalette::Dark).alpha() == 255) {
+            restore(); return;
+        }
+        const bool opaque = m_viewport->testAttribute(Qt::WA_OpaquePaintEvent);
+        if (!m_active) m_opaque = opaque;
+        // Okular may finish setting its attributes after the first polish.
+        else if (opaque) m_opaque = true;
+        m_active = true;
+        m_viewport->setAttribute(Qt::WA_OpaquePaintEvent, false);
+        if (opaque) m_viewport->update();
+    }
+    QWidget *m_viewport;
+    bool m_active = false;
+    bool m_opaque = false;
+};
+
 class NiriGlassStyle final : public QProxyStyle {
 public:
     explicit NiriGlassStyle(QStyle *base) : QProxyStyle(base) { setObjectName(QStringLiteral("NiriGlass")); }
@@ -276,6 +329,10 @@ public:
     void polish(QWidget *widget) override {
         QProxyStyle::polish(widget);
         if (!activeProfile() || excluded(widget)) return;
+        if (qApp->applicationName().compare(QLatin1String("okular"), Qt::CaseInsensitive) == 0)
+            if (auto *viewport = pageViewport(widget);
+                viewport && !viewport->findChild<QObject *>(QLatin1String(viewportFixName), Qt::FindDirectChildrenOnly))
+                new TranslucentPageViewport(viewport);
         if(qApp->applicationName()==QLatin1String("gwenview") && widget->inherits("Gwenview::ToolTipWidget")
             && widget->parentWidget()
             && !widget->findChild<QObject *>(QStringLiteral("_niriReadableHighlight"),Qt::FindDirectChildrenOnly))
@@ -296,6 +353,10 @@ public:
             && parent->layout() && parent->layout()->indexOf(button) < 0) button->hide();
     }
     void unpolish(QWidget *widget) override {
+        if (auto *viewport = pageViewport(widget))
+            if (auto *fix = viewport->findChild<QObject *>(QLatin1String(viewportFixName), Qt::FindDirectChildrenOnly)) {
+                static_cast<TranslucentPageViewport *>(fix)->restore(); delete fix;
+            }
         if(auto *reader=widget->findChild<QObject *>(QStringLiteral("_niriReadableHighlight"),Qt::FindDirectChildrenOnly)) {
             static_cast<ReadableHighlight *>(reader)->restore();delete reader;
         }

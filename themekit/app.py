@@ -14,7 +14,7 @@ import subprocess
 import sys
 import tempfile
 
-from . import integrate
+from . import integrate, portal
 from .integrate import Resource
 from .palette import render_palette
 from .paths import context, render
@@ -42,6 +42,7 @@ FILES = (
     ("assets/drawy/darklyrc", "@PROFILE_CONFIG@/apps/drawy/darklyrc", False),
     ("assets/drawy/drawy-glass", "@PROFILE_DATA@/bin/drawy-glass", False),
     ("themekit/quickstyle.py", "@PROFILE_DATA@/bin/filelight-glass", False),
+    ("themekit/session_env.py", "@PROFILE_DATA@/bin/niri-theme-session-env", False),
 )
 
 
@@ -121,7 +122,7 @@ def resources(ctx, mode, names=("glass", "kate"), *, dry_run=False):
         if substitute:
             data = render(data.decode(), ctx).encode()
         result.append(Resource(Path(render(target, ctx)), data,
-                               0o700 if source in ("assets/drawy/drawy-glass", "themekit/quickstyle.py") else 0o600))
+                               0o700 if source in ("assets/drawy/drawy-glass", "themekit/quickstyle.py", "themekit/session_env.py") else 0o600))
     for name in names:
         _, _, artifact, target = PLUGINS[name]
         path = REPO / artifact
@@ -136,6 +137,10 @@ def resources(ctx, mode, names=("glass", "kate"), *, dry_run=False):
     result.append(Resource(Path(ctx["PROFILE_SHARE"]) / "color-schemes/DankMatugenTranslucent.colors",
                            palette.encode(), generated=True))
     env = environment(ctx)
+    backend = portal.find_backend()
+    if backend:
+        wrapper = Path(ctx["PROFILE_DATA"]) / "bin" / portal.LAUNCHER
+        result.append(Resource(wrapper, portal.launcher(ctx, env, backend), 0o700))
     # systemd EnvironmentFile quoting, not shell commands or a session helper.
     def quote(value):
         if any(c in value for c in "\n\r\x00"):
@@ -327,6 +332,9 @@ def report(command, changes, ctx, dry_run, isolated):
         print(f"{'Backup would be' if dry_run else 'Backup'}: {backup}")
         if not dry_run:
             print("Reopen Kate, Dolphin, Gwenview, Filelight and Drawy once to load the installed theme.")
+            if (Path(ctx["PROFILE_DATA"]) / "bin" / portal.LAUNCHER).is_file():
+                print("KDE picker launch hook updated. After closing file dialogs, restart "
+                      + portal.UNIT + " to activate it; the installer does not restart the picker.")
     if isolated:
         print("Alternate home: no live services changed.")
 
@@ -348,10 +356,11 @@ def main(argv=None):
         if args.command == "restore":
             ctx = context(args.home)
             backup = Path(ctx["STATE_HOME"]) / "niri-dms-theme/backup.json"
-            if not backup.exists():
-                print("Nothing to restore: no theme backup found.")
-                return 0
+            had_backup = backup.exists()
             changes = integrate.restore(ctx, dry_run=args.dry_run, live=args.home is None)
+            if not had_backup:
+                print("Nothing to restore on disk: no theme backup found; session cleanup checked.")
+                return 0
             report("restore", changes, ctx, args.dry_run, args.home is not None)
         else:
             mode = args.mode or current_mode()

@@ -4,7 +4,7 @@
 
 `preview` builds the shared style (and Kate helper when needed), creates an isolated home, prepares the palette/settings, and opens Kate, Dolphin, Drawy, Gwenview or Filelight. On an active Niri socket it temporarily adds an optional exact-preview-ID rule to the original Niri config, then removes only its own block on exit, preserving other edits. Missing Niri skips the backdrop effect, not the app. It preserves existing preferences when reusing a known preview home. A real home or unrelated populated directory is refused. The printed preview directory is not deleted on exit.
 
-`install` builds both helpers before changing settings. It installs owned resources, adds marked Niri environment/material includes, writes process-local Niri/DMS service drop-ins, connects DMS's custom theme and Matugen output, enables Kate's plugin flag in existing sessions, and installs a Drawy Glass launcher. Existing bindings, GPU settings, other plugins, session data and unrelated preferences are kept. With no `--home`, it reloads user units and refreshes active DMS—not Niri or your apps.
+`install` builds both helpers before changing settings. It installs owned resources, adds marked Niri environment/material includes, writes process-local Niri/DMS service drop-ins, connects DMS's custom theme and Matugen output, enables Kate's plugin flag in existing sessions, and installs a Drawy Glass launcher. Existing bindings, GPU settings, other plugins, session data and unrelated preferences are kept. With no `--home`, it reloads user units and, when called from an active Niri session, performs the one-shot activation setup. It does not restart DMS, Niri or applications.
 
 `restore` reverses those owned settings, not whole app/session snapshots. Later user changes are retained. Modified app configuration or assets are kept with a warning and backup, rather than blocking the entire restore. Generated palette changes are expected. A manually edited marked Niri include requires review so the command cannot leave a dangling include.
 
@@ -12,13 +12,25 @@ For development, `--home PATH` redirects all XDG roots and suppresses service/ma
 
 ## Scope and backups
 
-New theme variables belong to Niri/DMS process environments, not the global user manager. Known obsolete Qt forcing in the earlier environment files/import hooks is removed with backups. On a real install, only manager values that exactly match the earlier qtengine/helper setup are cleared; unrelated values are retained. No new global theme values are imported.
+The approved scope is now the whole Niri session, not just children of DMS. The existing Niri unit gets bounded `ExecStartPre`/`ExecStopPost` actions. Setup runs before compositor readiness and exports exactly eleven Qt/profile/search-path variables to the user service manager and traditional D-Bus activation. Desktop identity, socket/display, PATH and other variables are not exported. The optional environment file and ignored, deadline-bounded helper failures must not block a Niri login. There is no separate service, daemon or polling loop. Static obsolete Qt forcing is still repaired with backups; manager values are no longer scrubbed as legacy before the session baseline is captured.
 
-The user manager and D-Bus activation environment are shared by one UID. Old D-Bus activation overrides cannot be queried/unset exactly; a fresh graphical login may still be needed after legacy cleanup. This is not a concurrent multi-DE/session orchestrator. Existing terminals keep their inherited environment until reopened. Pre-existing global KDE color-scheme and GTK preferences are not guessed/reset.
+The helper journals the original manager values privately under `$XDG_RUNTIME_DIR/niri-dms-theme/session-env.json` before mutation. Repeated activation keeps that original baseline. Cleanup restores values still equal to the installed values and preserves later manager changes, skipping their D-Bus counterparts too. Per-store pending work survives partial failures, including a D-Bus failure after successful manager restoration. Live restore aborts before deleting the helper/assets if cleanup fails. Unit reload does not restart any service; a live install from active Niri runs setup once with the active-state check under the same lock.
+
+The manager and D-Bus activation environment are UID-wide: this supports one graphical desktop at a time, not concurrent different desktops for one user. D-Bus has no public environment readback or unset. Its baseline is assumed to match the saved manager values; absent keys are restored as empty strings, and D-Bus-only later changes cannot be detected. Exact D-Bus rollback is not promised. State retention permits retry on the next lifecycle/explicit action, not guaranteed automatic recovery without another event.
+
+Only newly spawned processes using those activation stores gain the environment. Existing Ghostty, Kate or other services retain their old environment; opening another window may reuse an existing process. The next fresh graphical login is the consistent transition. Restore likewise cannot erase environments already inherited by running processes, so subsequent plugin loads from them may refer to removed resources until they exit. Pre-existing global KDE color-scheme and GTK preferences are not guessed/reset. Manager search paths retain their previous entries; Niri/DMS's direct environment file and config include still use the paths rendered at installation.
 
 Original data is stored privately at `$XDG_STATE_HOME/niri-dms-theme/backup.json`. Do not put it in Git. Reinstall retains the initial baseline. Restore never recursively deletes app-data, cache or artwork directories. Source/theme assets are separate from runtime-generated files.
 
 Darkly uses its normal config filename. Profile defaults are supplied through the scoped config search path; existing primary user preferences take priority. The Drawy profile has its own corner-radius override and app config/data/cache/state. Its wrapper falls back to ordinary Drawy outside the marked Niri session.
+
+## KDE file-picker activation
+
+When the KDE portal backend is installed, the kit also installs an owned, one-shot launcher and an ExecStart drop-in for `plasma-xdg-desktop-portal-kde.service`. D-Bus/systemd-activated pickers do not inherit DMS's environment after a fresh login. The launcher adds the profile only when the backend's existing desktop identifiers include `niri`; it preserves other desktop sessions and prefixes the existing plugin/config/data search paths rather than replacing them. It executes the real packaged backend directly, without a daemon, polling, manager imports or package edits.
+
+Install/restore tracks the launcher and drop-in with the same private backup as other owned resources. It does not automatically restart the portal backend: close any open file dialogs before restarting that service to activate or remove the hook. Normal application/editor/terminal processes do not need restarting for this backend-only change.
+
+Kate's Balanced Glass helper is separately session-enabled. A running session can save its disabled plugin flag after the installer updates the disk; enable it in the running Kate plugin settings rather than restarting editors or repeatedly reinstalling.
 
 ## Scoped reading surfaces and KDE apps
 
@@ -34,6 +46,14 @@ A partial custom QML style was rejected because it retained KDE components but l
 
 Native Gwenview captures confirmed its page background changing from opaque fallback to layered translucency while sample thumbnail pixels stayed identical and opaque. Native Dolphin status backing measured alpha 228/255 against 38/255 in surrounding content on the tested stack. These are rendered application checks; exact effective opacity depends on nesting and the compositor backdrop.
 
+## Okular translucent document background
+
+Okular 26.08.2 sets `WA_OpaquePaintEvent` on its `PageView` viewport but paints the exposed area around pages using `QPalette::Dark`. A translucent theme brush violates that opacity promise and can preserve old page/background pixels in the backing store. The profile clears only that hint on this exact viewport in Okular; it does not alter PDF rendering, page colors, document data, palette roles, autofill or the native no-system-background flag. Opaque brush transitions and unpolish restore the native hint. There is no repaint timer or document overlay.
+
+Source contract: [Okular PageView](https://invent.kde.org/graphics/okular/-/raw/v26.08.2/part/pageview.cpp). The opaque-hint correction passed an offscreen background test but did **not** fix the real Wayland origin-only corruption. Native reproduction traced that separate bug to `selectionClear` storing `setCoords(0,0,0,0)`: this is a non-null 1×1 selection. At `(h,v)=(0,0)` it activates the uninitialized compositing `QPixmap`; either scrollbar at 1 excludes that phantom selection. Initializing only that exact viewport-sized pixmap in an isolated diagnostic process fixed all three native 0→1→0 stages. The robust upstream fix should clear both selection rectangles correctly and initialize the main and secondary blending buffers.
+
+A separately user-approved workaround sets `[Dlg Performance] EnableCompositing=false` in the user's primary `okularpartrc`. It uses direct page painting and outline-only rectangle/table selection indicators; normal text selection, PDF page colors and Wayland/window translucency remain unchanged. Repeated real Wayland tests were clean at 0→1→0. A profile-only `XDG_CONFIG_DIRS` default was tested but ignored by this Okular path, despite the configuration-reader CLI seeing it; it must not be shipped as an effective scoped fix. The primary preference is not installed or reverted automatically by themekit. Once Okular has an upstream fix, remove this user preference to return to its compiled default. No package or document was patched.
+
 ## Preset and native limits
 
 - Qt backgrounds: about 10% palette alpha; Darkly surface sliders: 15%, independently configurable. Widget shadows are off to prevent gray wash through translucent fields.
@@ -44,4 +64,4 @@ Native Gwenview captures confirmed its page background changing from opaque fall
 - The same module preserves Drawy's rounded Frame containers and hides only the version-guarded unused hamburger in Drawy 1.0.2. Other apps keep native layout metrics. No application package is patched.
 - Compositor rules keep blur enabled, Xray off, and noise 0.008 for Kate/Dolphin/Drawy/Gwenview/Filelight and their popups. They do not override saturation; Niri keeps its existing behavior. They don't desaturate foreground ink/icons or alter unrelated app rules. Add other app IDs to the small material asset as needed. There is no refraction shader, global saturation override, or GTK/Electron skin.
 
-Tested with Qt 6.12/KF6 6.31, Kate 26.08.2, Darkly 0.5.42, Drawy 1.0.2, qtengine r47 and the Niri build supporting background blur/Xray. Qt5 needs its own matching style plugin.
+Tested with Qt 6.12/KF6 6.31, Kate 26.08.2, Darkly 0.5.42, Drawy 1.0.2, qtengine r47/r48 and the Niri build supporting background blur/Xray. Qt5 needs its own matching style plugin.

@@ -2,6 +2,8 @@
 import json
 from pathlib import Path
 import stat
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import patch, Mock
@@ -14,6 +16,11 @@ class IntegrationTests(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory(prefix='niri-integrate-')
         self.addCleanup(self.tmp.cleanup)
         home = Path(self.tmp.name)
+        runtime = home / 'runtime'
+        runtime.mkdir(mode=0o700)
+        runtime_env = patch.dict('os.environ', {'XDG_RUNTIME_DIR': str(runtime)})
+        runtime_env.start()
+        self.addCleanup(runtime_env.stop)
         self.ctx = {'HOME': str(home)}
         for key, suffix in [('CONFIG_HOME', '.config'), ('DATA_HOME', '.local/share'),
                             ('STATE_HOME', '.local/state'), ('CACHE_HOME', '.cache')]:
@@ -47,7 +54,7 @@ class IntegrationTests(unittest.TestCase):
         self.asset = Path(self.ctx['PROFILE_CONFIG']) / 'qtengine.json'
         self.resources = [Resource(self.asset, b'{}\n')]
         self.install()
-        expected = 'EnvironmentFile=' + str(Path(self.ctx['PROFILE_CONFIG']) / 'session.env') + '\n'
+        expected = 'EnvironmentFile=-' + str(Path(self.ctx['PROFILE_CONFIG']) / 'session.env') + '\n'
         for unit in ('niri', 'dms'):
             dropin = self.config / f'systemd/user/{unit}.service.d/50-niri-dms-theme.conf'
             self.assertIn(expected, dropin.read_text())
@@ -263,7 +270,7 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse((self.config / 'systemd/user/niri.service.d/50-niri-dms-theme.conf').exists())
         self.assertTrue((Path(self.ctx['STATE_HOME']) / 'niri-dms-theme/backup.json').exists())
 
-    def test_live_exact_legacy_manager_cleanup_and_ownership_restore(self):
+    def test_legacy_matching_manager_values_are_not_scrubbed_before_session_baseline(self):
         self.manager.stop()
         oldpath = self.ctx['HOME'] + '/.local/lib/qt6/plugins'
         values = {'QT_QPA_PLATFORMTHEME': 'qtengine', 'QT_QPA_PLATFORMTHEME_QT6': 'native',
@@ -285,8 +292,8 @@ class IntegrationTests(unittest.TestCase):
             return Mock(returncode=0)
         with patch('themekit.integrate.subprocess.run', side_effect=manager):
             self.install(live=True)
-            self.assertNotIn('QT_PLUGIN_PATH', values)
-            self.assertNotIn('QT_QPA_PLATFORMTHEME', values)
+            self.assertEqual(values['QT_PLUGIN_PATH'], oldpath)
+            self.assertEqual(values['QT_QPA_PLATFORMTHEME'], 'qtengine')
             self.assertEqual(values['QT_QPA_PLATFORMTHEME_QT6'], 'native')
             self.assertEqual(values['QT_STYLE_OVERRIDE'], 'Custom')
             values['QT_QPA_PLATFORMTHEME'] = 'new-owner'
@@ -344,18 +351,86 @@ class IntegrationTests(unittest.TestCase):
         self.assertFalse(self.asset.exists())
         self.assertIn('QT_QPA_PLATFORMTHEME "native"', self.niri.read_text())
 
-    def test_live_reloads_and_restarts_only_active_dms(self):
+    def test_live_reloads_unit_definitions_without_restarting_services(self):
         self.manager.stop()
         with patch('themekit.integrate.subprocess.run', return_value=Mock(returncode=0, stdout='')) as run:
             self.install(live=True)
             self.assertEqual([c.args[0] for c in run.call_args_list], [
-                ['systemctl', '--user', 'show-environment'],
-                ['systemctl', '--user', 'daemon-reload'],
-                ['systemctl', '--user', 'is-active', '--quiet', 'dms.service'],
-                ['systemctl', '--user', 'restart', 'dms.service']])
-        with patch('themekit.integrate.subprocess.run', return_value=Mock(returncode=3)) as run:
+                ['systemctl', '--user', 'daemon-reload']])
+        with patch('themekit.integrate.subprocess.run', return_value=Mock(returncode=0)) as run:
             restore(self.ctx, live=True)
-            self.assertEqual(len(run.call_args_list), 2)
+            self.assertEqual([c.args[0] for c in run.call_args_list], [
+                ['systemctl', '--user', 'daemon-reload']])
+
+    def session_helper(self):
+        helper = Path(self.ctx['PROFILE_DATA']) / 'bin/niri-theme-session-env'
+        self.resources.append(Resource(helper, b'#!/usr/bin/env python3\n', 0o700))
+        return helper
+
+    def test_session_hooks_are_niri_pre_and_post_only(self):
+        helper = self.session_helper()
+        self.install()
+        niri = (self.config/'systemd/user/niri.service.d/50-niri-dms-theme.conf').read_text()
+        dms = (self.config/'systemd/user/dms.service.d/50-niri-dms-theme.conf').read_text()
+        self.assertIn(f'ExecStartPre=-"{helper}" activate', niri)
+        self.assertIn(f'ExecStopPost=-"{helper}" deactivate', niri)
+        self.assertNotIn('ExecStartPre', dms)
+        self.assertFalse((self.config/'systemd/user/niri-theme-session.service').exists())
+
+    def test_current_session_activation_is_gated_and_does_not_restart_apps(self):
+        helper = self.session_helper();self.manager.stop()
+        with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP':'niri'}), \
+                patch('themekit.integrate.subprocess.run',return_value=Mock(returncode=0)) as run:
+            self.install(live=True)
+        commands=[call.args[0] for call in run.call_args_list]
+        source=Path(__file__).resolve().parent.parent/'themekit/session_env.py'
+        self.assertEqual(commands,[[sys.executable,str(source),'prepare','--require-active'],
+                                   ['systemctl','--user','daemon-reload'],
+                                   [str(helper),'activate','--require-active']])
+        self.assertEqual(run.call_args_list[-1].kwargs['env']['NIRI_DMS_THEME_PROFILE'],'niri-dms-glass')
+        with patch.dict('os.environ', {'XDG_CURRENT_DESKTOP':'COSMIC'}), \
+                patch('themekit.integrate.subprocess.run',return_value=Mock(returncode=0)) as run:
+            self.install(live=True)
+        self.assertEqual([call.args[0] for call in run.call_args_list],[['systemctl','--user','daemon-reload']])
+
+    def test_baseline_capture_precedes_assets_and_daemon_reload(self):
+        helper=self.session_helper();self.manager.stop();seen=[]
+        def run(command,**kwargs):
+            if 'prepare' in command:
+                self.assertFalse(self.asset.exists());self.assertFalse(helper.exists());seen.append('prepare')
+            elif 'daemon-reload' in command:
+                self.assertTrue(self.asset.exists());self.assertTrue(helper.exists());seen.append('reload')
+            elif 'activate' in command:
+                seen.append('activate')
+            else:self.fail(f'unexpected command: {command}')
+            return Mock(returncode=0)
+        with patch.dict('os.environ',{'XDG_CURRENT_DESKTOP':'niri'}), \
+                patch('themekit.integrate.subprocess.run',side_effect=run):self.install(live=True)
+        self.assertEqual(seen,['prepare','reload','activate'])
+
+    def test_failed_deactivation_keeps_helper_assets_and_backup(self):
+        helper=self.session_helper();self.install();self.manager.stop()
+        with patch('themekit.integrate.subprocess.run',side_effect=subprocess.CalledProcessError(1,[str(helper),'deactivate'])):
+            with self.assertRaises(subprocess.CalledProcessError):restore(self.ctx,live=True)
+        self.assertTrue(helper.exists());self.assertTrue(self.asset.exists())
+        self.assertTrue((Path(self.ctx['STATE_HOME'])/'niri-dms-theme/backup.json').is_file())
+        self.assertTrue((self.config/'systemd/user/niri.service.d/50-niri-dms-theme.conf').is_file())
+
+    def test_missing_runtime_helper_uses_source_cleanup_and_failure_blocks_restore(self):
+        self.install();self.manager.stop()
+        runtime=Path(self.tmp.name)/'runtime';state=runtime/'niri-dms-theme/session-env.json'
+        state.parent.mkdir(parents=True);state.write_text('{}')
+        source=Path(__file__).resolve().parent.parent/'themekit/session_env.py'
+        with patch.dict('os.environ',{'XDG_RUNTIME_DIR':str(runtime)}), \
+                patch('themekit.integrate.subprocess.run',side_effect=subprocess.CalledProcessError(1,[])) as run:
+            with self.assertRaises(subprocess.CalledProcessError):restore(self.ctx,live=True)
+        self.assertEqual(run.call_args.args[0],[sys.executable,str(source),'deactivate'])
+        self.assertTrue(self.asset.exists())
+
+    def test_alternate_home_and_dry_run_never_activate_session(self):
+        self.session_helper();self.install(live=False)
+        self.install(dry_run=True,live=True)
+        restore(self.ctx,dry_run=True,live=True)
 
 
 if __name__ == '__main__':

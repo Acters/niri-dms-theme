@@ -25,7 +25,8 @@ class WorkflowTests(unittest.TestCase):
         self.repo = self.root / "repo"
         shutil.copytree(ROOT / "assets", self.repo / "assets")
         (self.repo / "themekit").mkdir()
-        shutil.copy2(ROOT / "themekit/quickstyle.py", self.repo / "themekit/quickstyle.py")
+        for helper in ("quickstyle.py", "session_env.py"):
+            shutil.copy2(ROOT / "themekit" / helper, self.repo / "themekit" / helper)
         for name, (_, _, artifact, _) in app.PLUGINS.items():
             target = self.repo / artifact
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -214,7 +215,9 @@ class WorkflowTests(unittest.TestCase):
         for options in ([], ["--dry-run"]):
             with self.subTest(options=options), patch.object(app.integrate, "restore") as restore:
                 self.assertEqual(app.main(["restore", "--home", str(self.home), *options]), 0)
-                restore.assert_not_called()
+                restore.assert_called_once()
+                self.assertFalse(restore.call_args.kwargs['live'])
+                self.assertEqual(restore.call_args.kwargs['dry_run'],bool(options))
         self.assertIn("Nothing to restore", self.output.getvalue())
         self.assertNotIn("Restored:", self.output.getvalue())
         self.assertFalse(self.home.exists())
@@ -222,7 +225,7 @@ class WorkflowTests(unittest.TestCase):
     def test_executable_preview_command_launches_fake_kate_with_isolated_environment(self):
         package = self.repo / "themekit"
         package.mkdir(exist_ok=True)
-        for filename in ("__init__.py", "app.py", "paths.py", "integrate.py", "palette.py", "preview.py"):
+        for filename in ("__init__.py", "app.py", "paths.py", "integrate.py", "palette.py", "preview.py", "portal.py"):
             shutil.copy2(ROOT / "themekit" / filename, package / filename)
         binaries = self.repo / "bin"
         binaries.mkdir()
@@ -467,12 +470,45 @@ class WorkflowTests(unittest.TestCase):
                 patch.object(app, "wait_for_app", return_value=0):
             self.assertEqual(app.main(["preview", "kate", "--home", str(self.home), "--mode", "light"]), 0)
 
+    def test_cli_restore_cleans_prepared_state_after_first_backup_write_fails(self):
+        from themekit import session_env
+        ctx=context(str(self.home))
+        config=Path(ctx['CONFIG_HOME'])/'niri/config.kdl'
+        config.parent.mkdir(parents=True);config.write_text('layout {}\n')
+        runtime=self.root/'runtime';runtime.mkdir(mode=0o700)
+        env={**app.environment(ctx),'XDG_CURRENT_DESKTOP':'niri','XDG_RUNTIME_DIR':str(runtime)}
+        calls=[]
+        def manager(command,**kwargs):
+            calls.append(command)
+            if command[0]=='busctl':return subprocess.CompletedProcess(command,0,json.dumps({'type':'as','data':['QT_QPA_PLATFORMTHEME_QT6=qtengine']}),'')
+            if 'is-active' in command:return subprocess.CompletedProcess(command,0,'','')
+            self.fail(f'prepared-only cleanup must not mutate activation stores: {command}')
+        def helper(command,**kwargs):
+            if 'prepare' in command:session_env.prepare(env,manager,require_active=True)
+            elif 'deactivate' in command:session_env.deactivate(env,manager)
+            else:self.fail(f'unexpected process: {command}')
+            return subprocess.CompletedProcess(command,0,'','')
+        with patch.object(app,'context',return_value=ctx), patch.object(app,'build_plugins'), \
+                patch.object(app.integrate,'_save',side_effect=OSError('first backup write failed')), \
+                patch.object(app.integrate.subprocess,'run',side_effect=helper), \
+                patch.dict(os.environ,{'XDG_CURRENT_DESKTOP':'niri','XDG_RUNTIME_DIR':str(runtime)}):
+            self.assertNotEqual(app.main(['install','--mode','light']),0)
+            state=session_env.state_path(env)
+            self.assertEqual(json.loads(state.read_text())['phase'],'prepared')
+            self.assertFalse((Path(ctx['STATE_HOME'])/'niri-dms-theme/backup.json').exists())
+            self.assertEqual(app.main(['restore']),0)
+            self.assertFalse(state.exists())
+        self.assertEqual(len(calls),2)
+
     def test_resource_map_is_fixed_and_contains_activation_and_both_modules(self):
         ctx = context(str(self.home))
         items = app.resources(ctx, "dark")
         paths = {str(item.path) for item in items}
         self.assertEqual(len(paths), len(items))
-        self.assertFalse(any("theme-session" in p or "/lib/themekit" in p for p in paths))
+        self.assertFalse(any("/lib/themekit" in p for p in paths))
+        session = next(item for item in items if item.path.name == 'niri-theme-session-env')
+        self.assertEqual(session.mode, 0o700)
+        self.assertNotIn(b'from themekit', session.data)
         for name in app.PLUGINS:
             self.assertIn(str(Path(ctx["PLUGIN_ROOT"]) / app.PLUGINS[name][3]), paths)
         config = next(i.data for i in items if str(i.path).endswith("/qtengine.json"))
